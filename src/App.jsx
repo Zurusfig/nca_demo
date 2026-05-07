@@ -8,7 +8,7 @@ import { LizardCanvas } from './components/LizardCanvas';
 import { LizardControls } from './components/LizardControls';
 import { LizardSidebar } from './components/LizardSidebar';
 
-const DEFAULT_OBSTACLE = { x: 36, y: 36, size: 16 };
+const DEFAULT_OBSTACLE = { x: 12, y: 58, size: 16 };
 
 function App() {
   const [activeDemo, setActiveDemo] = useState('tree');
