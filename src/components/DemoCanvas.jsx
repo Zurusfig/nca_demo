@@ -6,40 +6,38 @@ const GRID_HEIGHT = 104;
 const SCALE = 5;
 
 export const DemoCanvas = forwardRef(function DemoCanvas({ phase, fertilizer, sunDir }, ref) {
-  const { canvasRef, state, model, loading, step, damage, plantSeed, reset, render, stateRef, injectSignals } = useNCA(phase);
-  const animationRef = useRef(null);
+  const { canvasRef, model, loading, modelError, step, damage, plantSeed, reset, render, stateRef } = useNCA(phase);
   const [paused, setPaused] = useState(false);
-  const canvasInitializedRef = useRef(false);
 
-  useImperativeHandle(ref, () => ({
-    reset,
-    plantSeed,
-    damage
-  }));
+  useImperativeHandle(ref, () => ({ reset, plantSeed, damage }));
 
-  // Initialize canvas with white background
+  // Render the initial seed state once the canvas mounts
   useEffect(() => {
-    if (canvasRef.current && !canvasInitializedRef.current) {
+    if (canvasRef.current) {
       const ctx = canvasRef.current.getContext('2d');
       ctx.fillStyle = 'white';
       ctx.fillRect(0, 0, GRID_WIDTH, GRID_HEIGHT);
-      canvasInitializedRef.current = true;
     }
+    if (stateRef.current) {
+      render(stateRef.current);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Animation loop
+  // Animation loop — only runs when a model is loaded
   useEffect(() => {
-    if (!model || !stateRef.current || paused) return;
+    if (!model || paused) return;
 
     let isMounted = true;
     let frameId = null;
 
     const animate = async () => {
-      if (stateRef.current && model && isMounted) {
+      if (!isMounted) return;
+      if (stateRef.current) {
         try {
           const newState = await step(stateRef.current, fertilizer, sunDir);
           if (newState && isMounted) {
-            stateRef.current?.dispose();
+            stateRef.current.dispose();
             stateRef.current = newState;
             render(stateRef.current);
           }
@@ -47,37 +45,23 @@ export const DemoCanvas = forwardRef(function DemoCanvas({ phase, fertilizer, su
           console.error('Animation error:', e);
         }
       }
-      if (isMounted) {
-        frameId = requestAnimationFrame(animate);
-      }
+      if (isMounted) frameId = requestAnimationFrame(animate);
     };
 
     frameId = requestAnimationFrame(animate);
-
     return () => {
       isMounted = false;
-      if (frameId) {
-        cancelAnimationFrame(frameId);
-      }
+      if (frameId) cancelAnimationFrame(frameId);
     };
-  }, [model, step, render, fertilizer, sunDir, paused]);
+  }, [model, step, render, fertilizer, sunDir, paused, stateRef]);
 
-  // Canvas interaction
   const handleCanvasClick = (e) => {
     if (!canvasRef.current) return;
-
     const rect = canvasRef.current.getBoundingClientRect();
-    const scaleX = GRID_WIDTH / rect.width;
-    const scaleY = GRID_HEIGHT / rect.height;
-
-    const x = Math.floor((e.clientX - rect.left) * scaleX);
-    const y = Math.floor((e.clientY - rect.top) * scaleY);
-
-    if (e.shiftKey) {
-      plantSeed(x, y);
-    } else {
-      damage(x, y);
-    }
+    const x = Math.floor((e.clientX - rect.left) * (GRID_WIDTH / rect.width));
+    const y = Math.floor((e.clientY - rect.top) * (GRID_HEIGHT / rect.height));
+    if (e.shiftKey) plantSeed(x, y);
+    else damage(x, y);
   };
 
   return (
@@ -92,7 +76,12 @@ export const DemoCanvas = forwardRef(function DemoCanvas({ phase, fertilizer, su
       </div>
 
       {loading && (
-        <div className="text-retro-amber">Loading model...</div>
+        <div className="text-retro-amber text-sm">Loading model...</div>
+      )}
+      {modelError && !loading && (
+        <div className="text-red-400 text-xs max-w-xs text-center">
+          Model not found. Place p{phase}_final.json in public/models/
+        </div>
       )}
 
       <canvas
@@ -101,14 +90,11 @@ export const DemoCanvas = forwardRef(function DemoCanvas({ phase, fertilizer, su
         height={GRID_HEIGHT}
         onClick={handleCanvasClick}
         className="retro-canvas border-2 border-retro-green cursor-crosshair"
-        style={{
-          width: `${GRID_WIDTH * SCALE}px`,
-          height: `${GRID_HEIGHT * SCALE}px`,
-        }}
+        style={{ width: `${GRID_WIDTH * SCALE}px`, height: `${GRID_HEIGHT * SCALE}px` }}
       />
 
       <div className="text-xs text-gray-500 text-center">
-        <div>Click: damage | Shift+Click: plant seed</div>
+        Click: damage &nbsp;|&nbsp; Shift+Click: plant seed
       </div>
     </div>
   );
