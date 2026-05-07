@@ -8,6 +8,7 @@ const SCALE = 5;
 export const DemoCanvas = forwardRef(function DemoCanvas({ phase, fertilizer, sunDir }, ref) {
   const { canvasRef, model, loading, modelError, step, damage, plantSeed, reset, render, stateRef } = useNCA(phase);
   const [paused, setPaused] = useState(false);
+  const isDraggingRef = useRef(false);
 
   useImperativeHandle(ref, () => ({ reset, plantSeed, damage }));
 
@@ -37,7 +38,6 @@ export const DemoCanvas = forwardRef(function DemoCanvas({ phase, fertilizer, su
         try {
           const newState = step(stateRef.current, fertilizer, sunDir);
           if (newState && isMounted) {
-            // Keep stateRef as a tf.Variable so .assign() works in damage/plantSeed
             stateRef.current.assign(newState);
             newState.dispose();
             render(stateRef.current);
@@ -56,13 +56,30 @@ export const DemoCanvas = forwardRef(function DemoCanvas({ phase, fertilizer, su
     };
   }, [model, step, render, fertilizer, sunDir, paused, stateRef]);
 
-  const handleCanvasClick = (e) => {
-    if (!canvasRef.current) return;
+  const getGridCoords = (e) => {
     const rect = canvasRef.current.getBoundingClientRect();
-    const x = Math.floor((e.clientX - rect.left) * (GRID_WIDTH / rect.width));
-    const y = Math.floor((e.clientY - rect.top) * (GRID_HEIGHT / rect.height));
+    return {
+      x: Math.floor((e.clientX - rect.left) * (GRID_WIDTH / rect.width)),
+      y: Math.floor((e.clientY - rect.top) * (GRID_HEIGHT / rect.height)),
+    };
+  };
+
+  const handleMouseDown = (e) => {
+    if (!canvasRef.current) return;
+    isDraggingRef.current = true;
+    const { x, y } = getGridCoords(e);
     if (e.shiftKey) plantSeed(x, y);
     else damage(x, y);
+  };
+
+  const handleMouseMove = (e) => {
+    if (!canvasRef.current || !isDraggingRef.current || e.shiftKey) return;
+    const { x, y } = getGridCoords(e);
+    damage(x, y);
+  };
+
+  const handleMouseUp = () => {
+    isDraggingRef.current = false;
   };
 
   return (
@@ -89,13 +106,16 @@ export const DemoCanvas = forwardRef(function DemoCanvas({ phase, fertilizer, su
         ref={canvasRef}
         width={GRID_WIDTH}
         height={GRID_HEIGHT}
-        onClick={handleCanvasClick}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
         className="retro-canvas border-2 border-retro-green cursor-crosshair"
         style={{ width: `${GRID_WIDTH * SCALE}px`, height: `${GRID_HEIGHT * SCALE}px` }}
       />
 
       <div className="text-xs text-gray-500 text-center">
-        Click: damage &nbsp;|&nbsp; Shift+Click: plant seed
+        Click/Drag: erase &nbsp;|&nbsp; Shift+Click: plant seed
       </div>
     </div>
   );
