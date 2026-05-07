@@ -29,15 +29,22 @@ export function useNCA(phase) {
 
     setLoading(true);
 
-    // Dispose old model and state when switching phases
+    // Dispose old model when switching phases
     if (modelRef.current) {
       modelRef.current.dispose();
     }
+
+    // Initialize state immediately (always as a variable)
     if (stateRef.current) {
       stateRef.current.dispose();
     }
+    const newState = initializeState();
+    stateRef.current = tf.variable(newState);
 
-    // Fetch JSON, parse constants, load model
+    // Plant center seed right away
+    plantSeed(Math.floor(GRID_WIDTH / 2), Math.floor(GRID_HEIGHT / 2));
+
+    // Then load model in background
     Promise.all([
       fetch(modelPath).then(r => r.json()),
       tf.loadGraphModel(modelPath)
@@ -50,30 +57,18 @@ export function useNCA(phase) {
         modelRef.current = loadedModel;
         setModel(loadedModel);
         setModelError(null);
-
-        // Initialize state as a variable
-        const initialState = initializeState();
-        stateRef.current = tf.variable(initialState);
-
-        // Plant center seed
-        setTimeout(() => plantSeed(Math.floor(GRID_WIDTH / 2), Math.floor(GRID_HEIGHT / 2)), 50);
         setLoading(false);
       })
       .catch(err => {
         console.error('Model load error:', err);
         setModelError(err.message);
-
-        // Fallback: initialize state even without model
-        const initialState = initializeState();
-        stateRef.current = tf.variable(initialState);
-        setTimeout(() => plantSeed(Math.floor(GRID_WIDTH / 2), Math.floor(GRID_HEIGHT / 2)), 50);
         setLoading(false);
       });
 
     return () => {
       // Cleanup on unmount
     };
-  }, [phase, initializeState]);
+  }, [phase, initializeState, plantSeed]);
 
   // Inject environmental signals — state is [1, H, W, C]
   const injectSignals = useCallback((state, fertilizer, sunDir) => {
