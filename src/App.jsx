@@ -25,15 +25,15 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-retro-dark text-gray-300 flex flex-col lg:flex-row">
-      {/* Sidebar */}
-      <aside className="w-full lg:w-64 lg:overflow-y-auto lg:max-h-screen p-6 border-b lg:border-b-0 lg:border-r border-retro-green order-last lg:order-first">
+    <div className="h-screen bg-retro-dark text-gray-300 flex flex-col lg:flex-row overflow-hidden">
+      {/* Sidebar — fixed height, scrolls independently */}
+      <aside className="w-full lg:w-72 lg:h-full lg:overflow-y-auto shrink-0 p-6 border-b lg:border-b-0 lg:border-r border-retro-green order-last lg:order-first">
         <h2 className="text-retro-green font-bold mb-4 text-lg">Background</h2>
         <Sidebar />
       </aside>
 
-      {/* Main content */}
-      <main className="flex-1 p-6 flex flex-col items-center justify-start overflow-y-auto">
+      {/* Main content — fills remaining space, scrolls independently */}
+      <main className="flex-1 h-full overflow-y-auto p-6 flex flex-col items-center justify-start">
         {/* Title */}
         <h1 className="text-3xl lg:text-4xl font-bold text-retro-green mb-2 text-center">
           Growing Trees with Environmental Awareness
