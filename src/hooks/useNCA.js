@@ -41,8 +41,16 @@ export function useNCA(phase) {
     const newState = initializeState();
     stateRef.current = tf.variable(newState);
 
-    // Plant center seed right away
-    plantSeed(Math.floor(GRID_WIDTH / 2), Math.floor(GRID_HEIGHT / 2));
+    // Plant center seed inline (can't call plantSeed — it's defined later)
+    tf.tidy(() => {
+      const cx = Math.floor(GRID_WIDTH / 2);
+      const cy = Math.floor(GRID_HEIGHT / 2);
+      const seedData = new Float32Array(CHANNELS);
+      seedData[SEED_CHANNEL] = 1.0;
+      const seed = tf.tensor4d(seedData, [1, 1, 1, CHANNELS]);
+      const padded = seed.pad([[0,0],[cy, GRID_HEIGHT-cy-1],[cx, GRID_WIDTH-cx-1],[0,0]]);
+      stateRef.current.assign(stateRef.current.add(padded));
+    });
 
     // Then load model in background
     Promise.all([
@@ -68,7 +76,7 @@ export function useNCA(phase) {
     return () => {
       // Cleanup on unmount
     };
-  }, [phase, initializeState, plantSeed]);
+  }, [phase, initializeState]);
 
   // Inject environmental signals — state is [1, H, W, C]
   const injectSignals = useCallback((state, fertilizer, sunDir) => {
