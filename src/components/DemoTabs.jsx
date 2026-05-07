@@ -12,8 +12,8 @@ export function DemoTabs({ active, onChange }) {
           onClick={() => onChange(tab.id)}
           className={`flex-1 px-6 py-2 text-sm font-bold transition ${
             active === tab.id
-              ? 'bg-retro-green text-retro-dark'
-              : 'bg-transparent text-retro-green hover:bg-retro-green hover:text-retro-dark'
+              ? 'bg-retro-green text-retro-dark font-bold'
+              : 'bg-retro-dark text-gray-500 hover:text-retro-green'
           }`}
         >
           {tab.label}
