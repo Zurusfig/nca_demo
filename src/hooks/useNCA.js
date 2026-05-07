@@ -12,6 +12,7 @@ export function useNCA(phase) {
   const modelRef = useRef(null);
   const [model, setModel] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [modelError, setModelError] = useState(null);
 
   // Initialize state
   const initializeState = useCallback(() => {
@@ -39,16 +40,20 @@ export function useNCA(phase) {
       stateRef.current.dispose();
     }
 
+    // Always plant the initial seed so the canvas isn't blank
+    const initialState = initializeState();
+    stateRef.current = initialState;
+
     tf.loadGraphModel(modelPath)
       .then(loadedModel => {
         modelRef.current = loadedModel;
         setModel(loadedModel);
-        const initialState = initializeState();
-        stateRef.current = initialState;
+        setModelError(null);
         setLoading(false);
       })
       .catch(err => {
-        console.error('Failed to load model:', err);
+        console.error('Model load error:', err);
+        setModelError(err.message);
         setLoading(false);
       });
 
@@ -86,28 +91,33 @@ export function useNCA(phase) {
     });
   }, [phase]);
 
-  // Step function
-  const step = useCallback(async (state, fertilizer, sunDir) => {
-    if (!modelRef.current) return state.clone();
+  // Step function — async, so we can't use tf.tidy; dispose manually
+  const step = useCallback(async (currentState, fertilizer, sunDir) => {
+    if (!modelRef.current) return currentState.clone();
 
-    return tf.tidy(() => {
-      const injected = injectSignals(state, fertilizer, sunDir);
+    const injected = injectSignals(currentState, fertilizer, sunDir);
+    const inputs = {
+      x: injected,
+      fire_rate: tf.scalar(0.5),
+      angle: tf.scalar(0.0),
+      step_size: tf.scalar(1.0)
+    };
 
-      const inputs = {
-        x: injected,
-        fire_rate: tf.tensor(0.5),
-        angle: tf.tensor(0.0),
-        step_size: tf.tensor(1.0)
-      };
-
-      try {
-        const output = modelRef.current.executeAsync(inputs);
-        return output;
-      } catch (e) {
-        console.error('Model execution failed:', e);
-        return state.clone();
-      }
-    });
+    try {
+      const result = await modelRef.current.executeAsync(inputs, 'Identity');
+      injected.dispose();
+      inputs.fire_rate.dispose();
+      inputs.angle.dispose();
+      inputs.step_size.dispose();
+      return result;
+    } catch (e) {
+      console.error('Model execution failed:', e);
+      injected.dispose();
+      inputs.fire_rate.dispose();
+      inputs.angle.dispose();
+      inputs.step_size.dispose();
+      return currentState.clone();
+    }
   }, [injectSignals]);
 
   // Damage (click)
@@ -210,9 +220,9 @@ export function useNCA(phase) {
 
   return {
     canvasRef,
-    state,
     model,
     loading,
+    modelError,
     step,
     damage,
     plantSeed,
