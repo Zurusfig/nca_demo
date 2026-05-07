@@ -96,8 +96,12 @@ export function useNCA(phase) {
     if (!modelRef.current) return currentState.clone();
 
     const injected = injectSignals(currentState, fertilizer, sunDir);
+    // Model expects a batch dimension: [1, H, W, C]
+    const batched = injected.expandDims(0);
+    injected.dispose();
+
     const inputs = {
-      x: injected,
+      x: batched,
       fire_rate: tf.scalar(0.5),
       angle: tf.scalar(0.0),
       step_size: tf.scalar(1.0)
@@ -105,14 +109,17 @@ export function useNCA(phase) {
 
     try {
       const result = await modelRef.current.executeAsync(inputs, 'Identity');
-      injected.dispose();
+      batched.dispose();
       inputs.fire_rate.dispose();
       inputs.angle.dispose();
       inputs.step_size.dispose();
-      return result;
+      // Remove batch dim: [1, H, W, C] → [H, W, C]
+      const squeezed = result.squeeze([0]);
+      result.dispose();
+      return squeezed;
     } catch (e) {
       console.error('Model execution failed:', e);
-      injected.dispose();
+      batched.dispose();
       inputs.fire_rate.dispose();
       inputs.angle.dispose();
       inputs.step_size.dispose();
