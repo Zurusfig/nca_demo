@@ -37,8 +37,9 @@ export const DemoCanvas = forwardRef(function DemoCanvas({ phase, fertilizer, su
         try {
           const newState = step(stateRef.current, fertilizer, sunDir);
           if (newState && isMounted) {
-            stateRef.current.dispose();
-            stateRef.current = newState;
+            // Keep stateRef as a tf.Variable so .assign() works in damage/plantSeed
+            stateRef.current.assign(newState);
+            newState.dispose();
             render(stateRef.current);
           }
         } catch (e) {
