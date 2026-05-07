@@ -9,12 +9,23 @@ export const DemoCanvas = forwardRef(function DemoCanvas({ phase, fertilizer, su
   const { canvasRef, state, model, loading, step, damage, plantSeed, reset, render, stateRef, injectSignals } = useNCA(phase);
   const animationRef = useRef(null);
   const [paused, setPaused] = useState(false);
+  const canvasInitializedRef = useRef(false);
 
   useImperativeHandle(ref, () => ({
     reset,
     plantSeed,
     damage
   }));
+
+  // Initialize canvas with white background
+  useEffect(() => {
+    if (canvasRef.current && !canvasInitializedRef.current) {
+      const ctx = canvasRef.current.getContext('2d');
+      ctx.fillStyle = 'white';
+      ctx.fillRect(0, 0, GRID_WIDTH, GRID_HEIGHT);
+      canvasInitializedRef.current = true;
+    }
+  }, []);
 
   // Animation loop
   useEffect(() => {

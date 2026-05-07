@@ -178,17 +178,29 @@ export function useNCA(phase) {
     for (let y = 0; y < GRID_HEIGHT; y++) {
       for (let x = 0; x < GRID_WIDTH; x++) {
         const idx = (y * GRID_WIDTH + x) * CHANNELS;
-        const alpha = Math.min(1, Math.max(0, stateData[idx])); // Channel 0 = alpha
+        const alpha = Math.min(1, Math.max(0, stateData[idx])); // Channel 0 = alive
 
-        // Inverted: white background with green overlay
-        const r = Math.min(255, Math.floor(255 * (1 - alpha)));
-        const g = Math.min(255, Math.floor(255 * (1 - alpha * 0.5)));
-        const b = Math.min(255, Math.floor(255 * (1 - alpha)));
+        // White background for dead cells, green tint for living cells
+        const alive = alpha > 0.1; // Threshold for visibility
+        const intensity = Math.pow(alpha, 0.5); // Gamma correction
+
+        let r, g, b;
+        if (alive) {
+          // Green (#7fff7f) with intensity
+          r = Math.floor(127 * intensity);
+          g = Math.floor(255 * intensity);
+          b = Math.floor(127 * intensity);
+        } else {
+          // White background
+          r = 255;
+          g = 255;
+          b = 255;
+        }
 
         const pixelIdx = (y * GRID_WIDTH + x) * 4;
-        data[pixelIdx] = r;
-        data[pixelIdx + 1] = g;
-        data[pixelIdx + 2] = b;
+        data[pixelIdx] = Math.min(255, r);
+        data[pixelIdx + 1] = Math.min(255, g);
+        data[pixelIdx + 2] = Math.min(255, b);
         data[pixelIdx + 3] = 255;
       }
     }
