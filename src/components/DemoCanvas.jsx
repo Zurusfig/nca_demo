@@ -31,11 +31,11 @@ export const DemoCanvas = forwardRef(function DemoCanvas({ phase, fertilizer, su
     let isMounted = true;
     let frameId = null;
 
-    const animate = async () => {
+    const animate = () => {
       if (!isMounted) return;
       if (stateRef.current) {
         try {
-          const newState = await step(stateRef.current, fertilizer, sunDir);
+          const newState = step(stateRef.current, fertilizer, sunDir);
           if (newState && isMounted) {
             stateRef.current.dispose();
             stateRef.current = newState;

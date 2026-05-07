@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import * as tf from '@tensorflow/tfjs';
+import { parseConsts } from '../lib/parseConsts';
 
 const GRID_WIDTH = 104;
 const GRID_HEIGHT = 104;
@@ -36,17 +37,25 @@ export function useNCA(phase) {
       stateRef.current.dispose();
     }
 
-    tf.loadGraphModel(modelPath)
-      .then(loadedModel => {
+    // Fetch JSON, parse constants, load model
+    Promise.all([
+      fetch(modelPath).then(r => r.json()),
+      tf.loadGraphModel(modelPath)
+    ])
+      .then(([json, loadedModel]) => {
+        // Parse and inject constants into model
+        const consts = parseConsts(json);
+        Object.assign(loadedModel.weights, consts);
+
         modelRef.current = loadedModel;
         setModel(loadedModel);
         setModelError(null);
 
-        // Initialize state as a variable (mutable tensor)
+        // Initialize state as a variable
         const initialState = initializeState();
         stateRef.current = tf.variable(initialState);
 
-        // Plant center seed after model loads
+        // Plant center seed
         setTimeout(() => plantSeed(Math.floor(GRID_WIDTH / 2), Math.floor(GRID_HEIGHT / 2)), 50);
         setLoading(false);
       })
@@ -54,7 +63,7 @@ export function useNCA(phase) {
         console.error('Model load error:', err);
         setModelError(err.message);
 
-        // Even without a valid model, initialize state so canvas renders
+        // Fallback: initialize state even without model
         const initialState = initializeState();
         stateRef.current = tf.variable(initialState);
         setTimeout(() => plantSeed(Math.floor(GRID_WIDTH / 2), Math.floor(GRID_HEIGHT / 2)), 50);
@@ -95,31 +104,26 @@ export function useNCA(phase) {
     });
   }, [phase]);
 
-  // Step function — state is already [1, H, W, C], no expandDims/squeeze needed
-  const step = useCallback(async (currentState, fertilizer, sunDir) => {
+  // Step function — synchronous execute with tf.tidy for cleanup
+  const step = useCallback((currentState, fertilizer, sunDir) => {
     if (!modelRef.current) return currentState.clone();
 
-    const injected = injectSignals(currentState, fertilizer, sunDir);
-    const inputs = {
-      x: injected,
-      fire_rate: tf.scalar(0.5),
-      angle: tf.scalar(0.0),
-      step_size: tf.scalar(1.0)
-    };
-
     try {
-      const result = await modelRef.current.executeAsync(inputs, 'Identity');
-      injected.dispose();
-      inputs.fire_rate.dispose();
-      inputs.angle.dispose();
-      inputs.step_size.dispose();
-      return result;
+      return tf.tidy(() => {
+        const injected = injectSignals(currentState, fertilizer, sunDir);
+        const result = modelRef.current.execute(
+          {
+            x: injected,
+            fire_rate: tf.scalar(0.5),
+            angle: tf.scalar(0.0),
+            step_size: tf.scalar(1.0)
+          },
+          'Identity'
+        );
+        return result;
+      });
     } catch (e) {
       console.error('Model execution failed:', e);
-      injected.dispose();
-      inputs.fire_rate.dispose();
-      inputs.angle.dispose();
-      inputs.step_size.dispose();
       return currentState.clone();
     }
   }, [injectSignals]);
