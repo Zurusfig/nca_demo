@@ -1,0 +1,52 @@
+{
+  "format": "graph-model",
+  "generatedBy": "TensorFlow.js",
+  "convertedBy": "TensorFlow.js Converter v1.0",
+  "signature": {
+    "inputs": {
+      "x": {
+        "name": "x",
+        "dtype": "DT_FLOAT",
+        "tensorShape": {
+          "dim": [
+            {"size": 104},
+            {"size": 104},
+            {"size": 18}
+          ]
+        }
+      },
+      "fire_rate": {
+        "name": "fire_rate",
+        "dtype": "DT_FLOAT",
+        "tensorShape": {}
+      },
+      "angle": {
+        "name": "angle",
+        "dtype": "DT_FLOAT",
+        "tensorShape": {}
+      },
+      "step_size": {
+        "name": "step_size",
+        "dtype": "DT_FLOAT",
+        "tensorShape": {}
+      }
+    },
+    "outputs": {
+      "Identity": {
+        "name": "Identity",
+        "dtype": "DT_FLOAT",
+        "tensorShape": {
+          "dim": [
+            {"size": 104},
+            {"size": 104},
+            {"size": 18}
+          ]
+        }
+      }
+    }
+  },
+  "modelTopology": {
+    "node": []
+  },
+  "weightsManifest": []
+}
