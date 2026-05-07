@@ -5,6 +5,7 @@ const GRID_WIDTH = 104;
 const GRID_HEIGHT = 104;
 const CHANNELS = 18;
 const SEED_CHANNEL = 3;
+const MARGIN = 20;
 
 export function useNCA(phase) {
   const canvasRef = useRef(null);
@@ -14,14 +15,9 @@ export function useNCA(phase) {
   const [loading, setLoading] = useState(false);
   const [modelError, setModelError] = useState(null);
 
-  // Initialize state
+  // Initialize state — always keep batch dimension [1, H, W, C]
   const initializeState = useCallback(() => {
-    const data = new Float32Array(GRID_HEIGHT * GRID_WIDTH * CHANNELS);
-    const seedX = Math.floor(GRID_WIDTH / 2);
-    const seedY = Math.floor(GRID_HEIGHT / 2);
-    const seedIdx = (seedY * GRID_WIDTH + seedX) * CHANNELS;
-    data[seedIdx + SEED_CHANNEL] = 1.0;
-    return tf.tensor3d(data, [GRID_HEIGHT, GRID_WIDTH, CHANNELS]);
+    return tf.zeros([1, GRID_HEIGHT, GRID_WIDTH, CHANNELS]);
   }, []);
 
   // Load model
@@ -40,20 +36,28 @@ export function useNCA(phase) {
       stateRef.current.dispose();
     }
 
-    // Always plant the initial seed so the canvas isn't blank
-    const initialState = initializeState();
-    stateRef.current = initialState;
-
     tf.loadGraphModel(modelPath)
       .then(loadedModel => {
         modelRef.current = loadedModel;
         setModel(loadedModel);
         setModelError(null);
+
+        // Initialize state as a variable (mutable tensor)
+        const initialState = initializeState();
+        stateRef.current = tf.variable(initialState);
+
+        // Plant center seed after model loads
+        setTimeout(() => plantSeed(Math.floor(GRID_WIDTH / 2), Math.floor(GRID_HEIGHT / 2)), 50);
         setLoading(false);
       })
       .catch(err => {
         console.error('Model load error:', err);
         setModelError(err.message);
+
+        // Even without a valid model, initialize state so canvas renders
+        const initialState = initializeState();
+        stateRef.current = tf.variable(initialState);
+        setTimeout(() => plantSeed(Math.floor(GRID_WIDTH / 2), Math.floor(GRID_HEIGHT / 2)), 50);
         setLoading(false);
       });
 
@@ -62,46 +66,42 @@ export function useNCA(phase) {
     };
   }, [phase, initializeState]);
 
-  // Inject environmental signals
+  // Inject environmental signals — state is [1, H, W, C]
   const injectSignals = useCallback((state, fertilizer, sunDir) => {
     return tf.tidy(() => {
-      // Channel 16: uniform fertilizer
-      const ch16 = tf.fill([GRID_HEIGHT, GRID_WIDTH, 1], fertilizer);
+      // Extract first 16 channels: [1, H, W, 16]
+      const base = state.slice([0, 0, 0, 0], [1, -1, -1, 16]);
 
-      // Channel 17: tapered sun gradient
-      const margin = 20;
-      const gradientData = new Float32Array(GRID_HEIGHT * GRID_WIDTH);
+      // Channel 16: uniform fertilizer [1, H, W, 1]
+      const ch16 = tf.ones([1, GRID_HEIGHT, GRID_WIDTH, 1]).mul(fertilizer);
+
+      // Channel 17: tapered sun gradient [1, H, W, 1]
+      const sunData = new Float32Array(GRID_HEIGHT * GRID_WIDTH);
       for (let y = 0; y < GRID_HEIGHT; y++) {
         for (let x = 0; x < GRID_WIDTH; x++) {
           const ramp = -1.0 + 2.0 * x / (GRID_WIDTH - 1);
           let taper = 1.0;
-          if (x < margin) taper = x / margin;
-          if (x >= GRID_WIDTH - margin) taper = (GRID_WIDTH - 1 - x) / margin;
+          if (x < MARGIN) taper = x / MARGIN;
+          if (x >= GRID_WIDTH - MARGIN) taper = (GRID_WIDTH - 1 - x) / MARGIN;
           const val = phase === 3 ? sunDir * ramp * taper : 0;
-          gradientData[y * GRID_WIDTH + x] = val;
+          sunData[y * GRID_WIDTH + x] = val;
         }
       }
-      const ch17 = tf.tensor3d(gradientData, [GRID_HEIGHT, GRID_WIDTH, 1]);
+      const ch17 = tf.tensor4d(sunData, [1, GRID_HEIGHT, GRID_WIDTH, 1]);
 
-      // Concatenate: first 16 channels from state, then 16, then 17
-      const ch0to15 = tf.slice(state, [0, 0, 0], [GRID_HEIGHT, GRID_WIDTH, 16]);
-      const newState = tf.concat([ch0to15, ch16, ch17], 2);
-
-      return newState;
+      // Concatenate along channel axis: [1, H, W, 16] + [1, H, W, 1] + [1, H, W, 1]
+      const injected = tf.concat([base, ch16, ch17], 3);
+      return injected;
     });
   }, [phase]);
 
-  // Step function — async, so we can't use tf.tidy; dispose manually
+  // Step function — state is already [1, H, W, C], no expandDims/squeeze needed
   const step = useCallback(async (currentState, fertilizer, sunDir) => {
     if (!modelRef.current) return currentState.clone();
 
     const injected = injectSignals(currentState, fertilizer, sunDir);
-    // Model expects a batch dimension: [1, H, W, C]
-    const batched = injected.expandDims(0);
-    injected.dispose();
-
     const inputs = {
-      x: batched,
+      x: injected,
       fire_rate: tf.scalar(0.5),
       angle: tf.scalar(0.0),
       step_size: tf.scalar(1.0)
@@ -109,17 +109,14 @@ export function useNCA(phase) {
 
     try {
       const result = await modelRef.current.executeAsync(inputs, 'Identity');
-      batched.dispose();
+      injected.dispose();
       inputs.fire_rate.dispose();
       inputs.angle.dispose();
       inputs.step_size.dispose();
-      // Remove batch dim: [1, H, W, C] → [H, W, C]
-      const squeezed = result.squeeze([0]);
-      result.dispose();
-      return squeezed;
+      return result;
     } catch (e) {
       console.error('Model execution failed:', e);
-      batched.dispose();
+      injected.dispose();
       inputs.fire_rate.dispose();
       inputs.angle.dispose();
       inputs.step_size.dispose();
@@ -127,61 +124,52 @@ export function useNCA(phase) {
     }
   }, [injectSignals]);
 
-  // Damage (click)
+  // Damage (click) — zero out cells in radius
   const damage = useCallback((x, y, radius = 8) => {
     if (!stateRef.current) return;
-
-    const current = stateRef.current;
-    const data = new Float32Array(GRID_HEIGHT * GRID_WIDTH * CHANNELS);
-    const currentData = current.dataSync();
-
-    // Copy current state
-    data.set(currentData);
-
-    // Zero out damaged area
-    for (let dy = -radius; dy <= radius; dy++) {
-      for (let dx = -radius; dx <= radius; dx++) {
-        if (dx * dx + dy * dy <= radius * radius) {
-          const ny = y + dy;
-          const nx = x + dx;
-          if (ny >= 0 && ny < GRID_HEIGHT && nx >= 0 && nx < GRID_WIDTH) {
-            const idx = (ny * GRID_WIDTH + nx) * CHANNELS;
-            for (let c = 0; c < CHANNELS; c++) {
-              data[idx + c] = 0;
-            }
-          }
-        }
-      }
-    }
-
-    current.dispose();
-    stateRef.current = tf.tensor3d(data, [GRID_HEIGHT, GRID_WIDTH, CHANNELS]);
+    tf.tidy(() => {
+      // Create mask for damaged region
+      const xx = tf.range(0, GRID_WIDTH).sub(x).div(radius).square().expandDims(0);
+      const yy = tf.range(0, GRID_HEIGHT).sub(y).div(radius).square().expandDims(1);
+      const distSq = xx.add(yy); // [H, W]
+      const mask = distSq.greater(1.0).expandDims(0).expandDims(3); // [1, H, W, 1]
+      const maskExpanded = tf.cast(mask, 'float32');
+      stateRef.current.assign(stateRef.current.mul(maskExpanded));
+    });
   }, []);
 
-  // Plant seed
-  const plantSeed = useCallback((x, y) => {
+  // Plant seed at (x, y) using padding
+  const plantSeed = useCallback((px, py) => {
     if (!stateRef.current) return;
+    // Clamp to grid
+    const x = Math.max(0, Math.min(px, GRID_WIDTH - 1));
+    const y = Math.max(0, Math.min(py, GRID_HEIGHT - 1));
 
-    const current = stateRef.current;
-    const data = new Float32Array(GRID_HEIGHT * GRID_WIDTH * CHANNELS);
+    tf.tidy(() => {
+      // Create single seed cell [1, 1, 1, 18] with channel 3 = 1
+      const seedData = new Float32Array(CHANNELS);
+      seedData[SEED_CHANNEL] = 1.0;
+      const seed = tf.tensor4d(seedData, [1, 1, 1, CHANNELS]);
 
-    // Zero out everything and plant seed
-    const idx = (y * GRID_WIDTH + x) * CHANNELS;
-    data[idx + SEED_CHANNEL] = 1.0;
+      // Pad to place seed at (y, x)
+      const x2 = GRID_WIDTH - x - 1;
+      const y2 = GRID_HEIGHT - y - 1;
+      const padded = seed.pad([[0, 0], [y, y2], [x, x2], [0, 0]]);
 
-    current.dispose();
-    stateRef.current = tf.tensor3d(data, [GRID_HEIGHT, GRID_WIDTH, CHANNELS]);
+      // Add seed to state
+      stateRef.current.assign(stateRef.current.add(padded));
+    });
   }, []);
 
-  // Reset
+  // Reset to zeros and plant center seed
   const reset = useCallback(() => {
-    if (stateRef.current) {
-      stateRef.current.dispose();
-    }
-    stateRef.current = initializeState();
-  }, [initializeState]);
+    tf.tidy(() => {
+      stateRef.current.assign(tf.zeros([1, GRID_HEIGHT, GRID_WIDTH, CHANNELS]));
+    });
+    setTimeout(() => plantSeed(Math.floor(GRID_WIDTH / 2), Math.floor(GRID_HEIGHT / 2)), 50);
+  }, [plantSeed]);
 
-  // Render to canvas
+  // Render to canvas — state is [1, H, W, C], extract RGBA and apply alpha blending
   const render = useCallback((state) => {
     if (!canvasRef.current || !state) return;
 
@@ -190,39 +178,22 @@ export function useNCA(phase) {
     const imageData = ctx.createImageData(GRID_WIDTH, GRID_HEIGHT);
     const data = imageData.data;
 
-    const stateData = state.dataSync();
+    tf.tidy(() => {
+      // Extract RGBA and alpha (channels 0-3 and channel 3)
+      const rgba = state.slice([0, 0, 0, 0], [1, -1, -1, 4]).squeeze([0]); // [H, W, 4]
+      const alpha = state.slice([0, 0, 0, 3], [1, -1, -1, 1]).squeeze([0]); // [H, W, 1]
 
-    for (let y = 0; y < GRID_HEIGHT; y++) {
-      for (let x = 0; x < GRID_WIDTH; x++) {
-        const idx = (y * GRID_WIDTH + x) * CHANNELS;
-        const alpha = Math.min(1, Math.max(0, stateData[idx])); // Channel 0 = alive
+      // Color math: white background (1.0) blended with alpha
+      // Result = (1 - alpha) + rgba * alpha (approximation)
+      const invAlpha = tf.scalar(1.0).sub(alpha); // [H, W, 1]
+      const img = invAlpha.add(rgba).mul(255).clipByValue(0, 255); // [H, W, 4]
 
-        // White background for dead cells, green tint for living cells
-        const alive = alpha > 0.1; // Threshold for visibility
-        const intensity = Math.pow(alpha, 0.5); // Gamma correction
+      const bytes = new Uint8ClampedArray(img.dataSync());
+      ctx.putImageData(new ImageData(bytes, GRID_WIDTH, GRID_HEIGHT), 0, 0);
+    });
 
-        let r, g, b;
-        if (alive) {
-          // Green (#7fff7f) with intensity
-          r = Math.floor(127 * intensity);
-          g = Math.floor(255 * intensity);
-          b = Math.floor(127 * intensity);
-        } else {
-          // White background
-          r = 255;
-          g = 255;
-          b = 255;
-        }
-
-        const pixelIdx = (y * GRID_WIDTH + x) * 4;
-        data[pixelIdx] = Math.min(255, r);
-        data[pixelIdx + 1] = Math.min(255, g);
-        data[pixelIdx + 2] = Math.min(255, b);
-        data[pixelIdx + 3] = 255;
-      }
-    }
-
-    ctx.putImageData(imageData, 0, 0);
+    // Apply retro filter
+    canvas.style.filter = 'contrast(1.3) saturate(1.2)';
   }, []);
 
   return {
