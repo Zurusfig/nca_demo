@@ -1,37 +1,52 @@
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useImperativeHandle, forwardRef } from 'react';
 import { useNCA } from '../hooks/useNCA';
 
 const GRID_WIDTH = 104;
 const GRID_HEIGHT = 104;
 const SCALE = 5;
 
-export function DemoCanvas({ phase, fertilizer, sunDir }) {
-  const { canvasRef, state, model, loading, step, damage, plantSeed, render, stateRef, injectSignals } = useNCA(phase);
+export const DemoCanvas = forwardRef(function DemoCanvas({ phase, fertilizer, sunDir }, ref) {
+  const { canvasRef, state, model, loading, step, damage, plantSeed, reset, render, stateRef, injectSignals } = useNCA(phase);
   const animationRef = useRef(null);
   const [paused, setPaused] = useState(false);
+
+  useImperativeHandle(ref, () => ({
+    reset,
+    plantSeed,
+    damage
+  }));
 
   // Animation loop
   useEffect(() => {
     if (!model || !stateRef.current || paused) return;
 
-    const animate = () => {
-      if (stateRef.current && model) {
-        // Use tf.tidy to avoid memory leaks
-        const newState = step(stateRef.current, fertilizer, sunDir);
-        if (newState) {
-          stateRef.current?.dispose();
-          stateRef.current = newState;
-          render(stateRef.current);
+    let isMounted = true;
+    let frameId = null;
+
+    const animate = async () => {
+      if (stateRef.current && model && isMounted) {
+        try {
+          const newState = await step(stateRef.current, fertilizer, sunDir);
+          if (newState && isMounted) {
+            stateRef.current?.dispose();
+            stateRef.current = newState;
+            render(stateRef.current);
+          }
+        } catch (e) {
+          console.error('Animation error:', e);
         }
       }
-      animationRef.current = requestAnimationFrame(animate);
+      if (isMounted) {
+        frameId = requestAnimationFrame(animate);
+      }
     };
 
-    animationRef.current = requestAnimationFrame(animate);
+    frameId = requestAnimationFrame(animate);
 
     return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
+      isMounted = false;
+      if (frameId) {
+        cancelAnimationFrame(frameId);
       }
     };
   }, [model, step, render, fertilizer, sunDir, paused]);
@@ -86,4 +101,4 @@ export function DemoCanvas({ phase, fertilizer, sunDir }) {
       </div>
     </div>
   );
-}
+});

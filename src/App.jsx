@@ -8,18 +8,20 @@ function App() {
   const [phase, setPhase] = useState(2);
   const [fertilizer, setFertilizer] = useState(0.5);
   const [sunDir, setSunDir] = useState(0);
-  const canvasRef = useRef(null);
+  const demoCanvasRef = useRef(null);
 
   const handleReset = () => {
-    if (canvasRef.current) {
-      const ctx = canvasRef.current.getContext('2d');
-      ctx.fillStyle = 'white';
-      ctx.fillRect(0, 0, 104, 104);
+    if (demoCanvasRef.current) {
+      demoCanvasRef.current.reset();
     }
   };
 
   const handlePlantSeed = () => {
-    // This will be handled by the DemoCanvas component
+    if (demoCanvasRef.current) {
+      const centerX = 52;
+      const centerY = 52;
+      demoCanvasRef.current.plantSeed(centerX, centerY);
+    }
   };
 
   return (
@@ -50,7 +52,7 @@ function App() {
           {/* Canvas */}
           <div className="flex-1">
             <DemoCanvas
-              ref={canvasRef}
+              ref={demoCanvasRef}
               phase={phase}
               fertilizer={fertilizer}
               sunDir={phase === 3 ? sunDir : 0}
